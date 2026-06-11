@@ -44,6 +44,7 @@ class PlannerAgent(BaseAgent):
         source_context: str,
         caption: str,
         examples: list[ReferenceExample],
+        input_images: list[str] | None = None,
         diagram_type: DiagramType = DiagramType.METHODOLOGY,
         supported_ratios: list[str] | None = None,
     ) -> tuple[str, str | None]:
@@ -53,6 +54,7 @@ class PlannerAgent(BaseAgent):
             source_context: Methodology text from the paper.
             caption: Communicative intent / figure caption.
             examples: Retrieved reference examples for in-context learning.
+            input_images: Optional user-provided sketch/reference image paths.
             diagram_type: Type of diagram being generated.
             supported_ratios: Aspect ratios the image provider supports.
 
@@ -65,6 +67,9 @@ class PlannerAgent(BaseAgent):
 
         # Load reference images for visual in-context learning
         example_images = await asyncio.to_thread(self._load_example_images, examples)
+        user_images = await asyncio.to_thread(self._load_input_images, input_images or [])
+        if user_images:
+            examples_text += self._format_input_image_guidance(len(user_images))
 
         prompt_type = "diagram" if diagram_type == DiagramType.METHODOLOGY else "plot"
         template = self.load_prompt(prompt_type)
@@ -82,13 +87,15 @@ class PlannerAgent(BaseAgent):
         logger.info(
             "Running planner agent",
             num_examples=len(examples),
-            num_images=len(example_images),
+            num_reference_images=len(example_images),
+            num_input_images=len(user_images),
             context_length=len(source_context),
         )
 
+        all_images = [*example_images, *user_images]
         raw_output = await self.vlm.generate(
             prompt=prompt,
-            images=example_images if example_images else None,
+            images=all_images if all_images else None,
             temperature=0.7,
             max_tokens=4096,
         )
@@ -136,6 +143,23 @@ class PlannerAgent(BaseAgent):
                 f"{structure_info}"
                 f"{image_ref}\n"
             )
+        return "\n".join(lines)
+
+    def _format_input_image_guidance(self, image_count: int) -> str:
+        """Format user-provided reference/sketch images for the planner prompt."""
+        if image_count <= 0:
+            return ""
+        lines = [
+            "\n\n## User-Provided Reference/Sketch Images",
+            (
+                "The user also provided the following image(s) as layout/content guidance. "
+                "Treat them as reference sketches or prior figures: preserve useful spatial "
+                "organization and visual intent, but ensure the final diagram remains faithful "
+                "to the methodology text and caption."
+            ),
+        ]
+        for i in range(1, image_count + 1):
+            lines.append(f"- User reference/sketch image {i}: [See provided image]")
         return "\n".join(lines)
 
     def _has_valid_image(self, example: ReferenceExample) -> bool:
@@ -238,6 +262,23 @@ class PlannerAgent(BaseAgent):
                 logger.warning(
                     "Failed to load reference image",
                     image_path=ex.image_path,
+                    error=str(e),
+                )
+        return images
+
+    def _load_input_images(self, image_paths: list[str]) -> list:
+        """Load user-provided local reference/sketch images for planning."""
+        images = []
+        for image_path in image_paths:
+            try:
+                path = Path(image_path).expanduser()
+                if not path.is_file():
+                    raise FileNotFoundError(str(path))
+                images.append(load_image(path))
+            except Exception as e:
+                logger.warning(
+                    "Failed to load user-provided reference image",
+                    image_path=image_path,
                     error=str(e),
                 )
         return images

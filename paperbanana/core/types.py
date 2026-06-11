@@ -87,6 +87,12 @@ class GenerationInput(BaseModel):
             "looked up directly from the ReferenceStore."
         ),
     )
+    input_images: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Optional local reference/sketch image paths used as visual guidance during planning."
+        ),
+    )
     vector_export: Optional[VectorExportMode] = Field(
         default=None,
         description="Optional vector export (svg/pdf/both); None uses Settings.vector_export",

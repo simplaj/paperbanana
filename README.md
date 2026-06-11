@@ -236,6 +236,13 @@ paperbanana generate \
   --input method.txt \
   --caption "Overview of our framework"
 
+# Guide layout/content with a sketch or prior figure
+paperbanana generate \
+  --input method.txt \
+  --caption "Overview of our framework" \
+  --image sketch.png \
+  --image previous_figure.png
+
 # With input optimization and auto-refine
 paperbanana generate \
   --input method.txt \
@@ -261,6 +268,7 @@ paperbanana generate \
 |------|-------|-------------|
 | `--input` | `-i` | Path to methodology text file or PDF (required for new runs) |
 | `--caption` | `-c` | Figure caption / communicative intent (required for new runs) |
+| `--image` | | Reference/sketch image path to guide planning; repeat for multiple images |
 | `--output` | `-o` | Output image path (default: auto-generated in `outputs/`) |
 | `--iterations` | `-n` | Number of Visualizer-Critic refinement rounds (default: 3) |
 | `--auto` | | Loop until critic is satisfied (with `--max-iterations` safety cap) |

@@ -799,6 +799,7 @@ class PaperBananaPipeline:
             run_id=self.run_id,
             diagram_type=input.diagram_type.value,
             context_length=len(input.source_context),
+            input_image_count=len(input.input_images),
         )
 
         # Save input for resume/continue support
@@ -810,6 +811,7 @@ class PaperBananaPipeline:
                     "diagram_type": input.diagram_type.value,
                     "raw_data": input.raw_data,
                     "aspect_ratio": input.aspect_ratio,
+                    "input_images": input.input_images,
                     "vector_export": self._effective_vector_export(input),
                 },
                 self._run_dir / "run_input.json",
@@ -880,12 +882,11 @@ class PaperBananaPipeline:
                         self._run_dir / "optimization.json",
                     )
 
-                input = GenerationInput(
-                    source_context=optimized["optimized_context"],
-                    communicative_intent=optimized["optimized_caption"],
-                    diagram_type=input.diagram_type,
-                    raw_data=input.raw_data,
-                    aspect_ratio=input.aspect_ratio,
+                input = input.model_copy(
+                    update={
+                        "source_context": optimized["optimized_context"],
+                        "communicative_intent": optimized["optimized_caption"],
+                    }
                 )
             except Exception:
                 optimize_seconds = time.perf_counter() - optimize_start
@@ -1013,6 +1014,7 @@ class PaperBananaPipeline:
             source_context=input.source_context,
             caption=input.communicative_intent,
             examples=examples,
+            input_images=input.input_images,
             diagram_type=input.diagram_type,
             supported_ratios=getattr(self.visualizer.image_gen, "supported_ratios", None),
         )
@@ -1080,6 +1082,7 @@ class PaperBananaPipeline:
             save_json(
                 {
                     "retrieved_examples": [e.id for e in examples],
+                    "input_images": input.input_images,
                     "initial_description": description,
                     "optimized_description": optimized_description,
                     "planner_recommended_ratio": planner_ratio,
@@ -1108,6 +1111,13 @@ class PaperBananaPipeline:
         iterations: list[IterationRecord] = []
         iteration_timings = []
         vector_formats = ["svg", "pdf"] if self.settings.vector_export != "none" else None
+        reference_guidance_note = None
+        if input.input_images and input.diagram_type == DiagramType.METHODOLOGY:
+            reference_guidance_note = (
+                "The Planner used user-provided reference/sketch image guidance. "
+                "Follow the described layout intent while keeping every visible label "
+                "faithful to the methodology text and caption."
+            )
 
         if self.settings.auto_refine:
             total_iters = self.settings.max_iterations
@@ -1156,6 +1166,7 @@ class PaperBananaPipeline:
                 seed=self.settings.seed,
                 aspect_ratio=effective_ratio,
                 vector_formats=vector_formats,
+                reference_guidance_note=reference_guidance_note,
             )
             visualizer_seconds = time.perf_counter() - visualizer_start
             _emit_progress(
@@ -1464,6 +1475,7 @@ class PaperBananaPipeline:
             "external_enabled": self.settings.exemplar_retrieval_enabled,
             "external_candidate_ids": external_candidate_ids,
         }
+        metadata_dict["input_images"] = {"count": len(input.input_images)}
         if generated_caption is not None:
             metadata_dict["generated_caption"] = generated_caption
         if ir_planner_status is not None:

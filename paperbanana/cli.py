@@ -107,6 +107,35 @@ def _check_pdf_dep(path: Path) -> None:
         _require_pdf_dep()
 
 
+def _validate_input_image_paths(image_paths: Optional[list[str]]) -> list[str]:
+    """Validate repeatable --image paths and return absolute path strings."""
+    if not image_paths:
+        return []
+
+    from PIL import Image, UnidentifiedImageError
+
+    validated: list[str] = []
+    for raw in image_paths:
+        path = Path(raw).expanduser()
+        if not path.exists():
+            console.print(f"[red]Error: Reference image not found: {raw}[/red]")
+            raise typer.Exit(1)
+        if not path.is_file():
+            console.print(f"[red]Error: Reference image is not a file: {raw}[/red]")
+            raise typer.Exit(1)
+        try:
+            with Image.open(path) as img:
+                img.verify()
+        except (UnidentifiedImageError, OSError) as e:
+            console.print(
+                f"[red]Error: Reference image is not a readable raster image: {raw}[/red]"
+            )
+            console.print(f"[dim]{e}[/dim]")
+            raise typer.Exit(1)
+        validated.append(str(path.resolve()))
+    return validated
+
+
 def _require_studio_dep() -> None:
     """Raise a clean error if Gradio is not installed."""
     try:
@@ -236,6 +265,11 @@ def generate(
     ),
     caption: Optional[str] = typer.Option(
         None, "--caption", "-c", help="Figure caption / communicative intent"
+    ),
+    input_images: Optional[list[str]] = typer.Option(
+        None,
+        "--image",
+        help="Reference/sketch image path to guide planning (repeatable)",
     ),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Output image path"),
     output_dir: Optional[str] = typer.Option(
@@ -435,6 +469,9 @@ def generate(
         console.print(
             "[red]Error: --pdf-pages cannot be used with --continue or --continue-run[/red]"
         )
+        raise typer.Exit(1)
+    if input_images and (continue_last or continue_run):
+        console.print("[red]Error: --image cannot be used with --continue or --continue-run[/red]")
         raise typer.Exit(1)
 
     _valid_categories = {
@@ -691,6 +728,7 @@ def generate(
         raise typer.Exit(1)
 
     # Build generation input
+    validated_input_images = _validate_input_image_paths(input_images)
     ref_id_list = None
     if reference_ids:
         ref_id_list = [rid.strip() for rid in reference_ids.split(",") if rid.strip()]
@@ -700,6 +738,7 @@ def generate(
         diagram_type=DiagramType.METHODOLOGY,
         aspect_ratio=aspect_ratio,
         reference_ids=ref_id_list,
+        input_images=validated_input_images,
     )
 
     # Determine expected output file extension based on settings.output_format
@@ -739,11 +778,15 @@ def generate(
         pdf_note = ""
         if input_path.suffix.lower() == ".pdf":
             pdf_note = f"\nPDF pages: {pdf_pages.strip() if pdf_pages else 'all'}"
+        image_note = ""
+        if validated_input_images:
+            image_note = f"\nReference images: {len(validated_input_images)}"
         console.print(
             Panel.fit(
                 "[bold]PaperBanana[/bold] - Dry Run\n\n"
                 f"Input: {input_path}{pdf_note}\n"
                 f"Caption: {caption}\n"
+                f"{image_note}\n"
                 f"VLM: {settings.vlm_provider} / {settings.effective_vlm_model}\n"
                 f"Image: {settings.image_provider} / {settings.effective_image_model}\n"
                 f"Iterations: {settings.refinement_iterations}\n"
@@ -763,7 +806,8 @@ def generate(
                 f"[bold]PaperBanana[/bold] - Generating Methodology Diagram\n\n"
                 f"VLM: {settings.vlm_provider} / {settings.effective_vlm_model}\n"
                 f"Image: {settings.image_provider} / {settings.effective_image_model}\n"
-                f"Iterations: {iter_label}",
+                f"Iterations: {iter_label}\n"
+                f"Reference images: {len(validated_input_images)}",
                 border_style="blue",
             )
         )
