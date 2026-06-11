@@ -69,7 +69,9 @@ class PlannerAgent(BaseAgent):
         example_images = await asyncio.to_thread(self._load_example_images, examples)
         user_images = await asyncio.to_thread(self._load_input_images, input_images or [])
         if user_images:
-            examples_text += self._format_input_image_guidance(len(user_images))
+            examples_text += self._format_input_image_guidance(
+                len(user_images), offset=len(example_images)
+            )
 
         prompt_type = "diagram" if diagram_type == DiagramType.METHODOLOGY else "plot"
         template = self.load_prompt(prompt_type)
@@ -145,21 +147,32 @@ class PlannerAgent(BaseAgent):
             )
         return "\n".join(lines)
 
-    def _format_input_image_guidance(self, image_count: int) -> str:
-        """Format user-provided reference/sketch images for the planner prompt."""
+    def _format_input_image_guidance(self, image_count: int, offset: int = 0) -> str:
+        """Format user-provided reference/sketch images for the planner prompt.
+
+        Args:
+            image_count: Number of user-provided images attached.
+            offset: Number of retrieved reference images attached before them.
+        """
         if image_count <= 0:
             return ""
+        if image_count == 1:
+            positions = f"attached image {offset + 1}"
+        else:
+            positions = f"attached images {offset + 1}-{offset + image_count}"
         lines = [
             "\n\n## User-Provided Reference/Sketch Images",
             (
-                "The user also provided the following image(s) as layout/content guidance. "
-                "Treat them as reference sketches or prior figures: preserve useful spatial "
-                "organization and visual intent, but ensure the final diagram remains faithful "
-                "to the methodology text and caption."
+                f"The user also provided {image_count} image(s) as layout/content guidance: "
+                f"the last {image_count} attached image(s) ({positions}). Any earlier attached "
+                "images are retrieved reference examples. Treat the user-provided image(s) as "
+                "reference sketches or prior figures: preserve useful spatial organization and "
+                "visual intent, but ensure the final diagram remains faithful to the "
+                "methodology text and caption."
             ),
         ]
-        for i in range(1, image_count + 1):
-            lines.append(f"- User reference/sketch image {i}: [See provided image]")
+        for i in range(image_count):
+            lines.append(f"- User reference/sketch image {i + 1}: attached image {offset + 1 + i}")
         return "\n".join(lines)
 
     def _has_valid_image(self, example: ReferenceExample) -> bool:

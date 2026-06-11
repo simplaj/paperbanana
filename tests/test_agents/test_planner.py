@@ -93,3 +93,77 @@ def test_load_example_images_loads_from_url(monkeypatch):
     images = agent._load_example_images(examples)
     assert len(images) == 1
     assert images[0].size == (1, 1)
+
+
+# ── user-provided reference/sketch images (issue #223) ──────────────
+
+
+def test_format_input_image_guidance_identifies_last_images():
+    """Guidance text tells the model which attached images are user-provided."""
+    agent = PlannerAgent(_MockVLM())
+    text = agent._format_input_image_guidance(2, offset=3)
+
+    assert "User-Provided Reference/Sketch Images" in text
+    assert "last 2 attached image(s)" in text
+    assert "attached images 4-5" in text
+    assert "User reference/sketch image 1: attached image 4" in text
+    assert "User reference/sketch image 2: attached image 5" in text
+
+
+def test_format_input_image_guidance_single_image_no_offset():
+    """With one user image and no exemplar images, it is attached image 1."""
+    agent = PlannerAgent(_MockVLM())
+    text = agent._format_input_image_guidance(1, offset=0)
+
+    assert "attached image 1" in text
+    assert "User reference/sketch image 1: attached image 1" in text
+
+
+def test_format_input_image_guidance_empty():
+    """No user images means no guidance section."""
+    agent = PlannerAgent(_MockVLM())
+    assert agent._format_input_image_guidance(0) == ""
+
+
+def test_load_input_images_skips_unreadable_paths(tmp_path):
+    """Local images load; missing paths are skipped with a warning, not an error."""
+    agent = PlannerAgent(_MockVLM())
+    img_path = tmp_path / "sketch.png"
+    Image.new("RGB", (2, 2), color=(0, 255, 0)).save(img_path)
+
+    images = agent._load_input_images([str(img_path), str(tmp_path / "missing.png")])
+
+    assert len(images) == 1
+    assert images[0].size == (2, 2)
+
+
+def test_run_passes_user_images_after_examples(tmp_path):
+    """run() attaches user images after exemplar images and adds prompt guidance."""
+    import asyncio
+
+    captured = {}
+
+    class _CapturingVLM(_MockVLM):
+        async def generate(self, prompt, images=None, **kwargs):
+            captured["prompt"] = prompt
+            captured["images"] = images
+            return "a diagram description"
+
+    agent = PlannerAgent(_CapturingVLM())
+    img_path = tmp_path / "sketch.png"
+    Image.new("RGB", (3, 3), color=(0, 0, 255)).save(img_path)
+
+    description, _ratio = asyncio.run(
+        agent.run(
+            source_context="Our method has two stages.",
+            caption="Overview of our framework",
+            examples=[],
+            input_images=[str(img_path)],
+        )
+    )
+
+    assert description == "a diagram description"
+    assert len(captured["images"]) == 1
+    assert captured["images"][0].size == (3, 3)
+    assert "User-Provided Reference/Sketch Images" in captured["prompt"]
+    assert "attached image 1" in captured["prompt"]

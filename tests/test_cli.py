@@ -6,9 +6,11 @@ import json
 import tempfile
 from pathlib import Path
 
+import pytest
+import typer
 from typer.testing import CliRunner
 
-from paperbanana.cli import app
+from paperbanana.cli import _validate_input_image_paths, app
 
 runner = CliRunner()
 HELP_TERMINAL_WIDTH = 200
@@ -1405,3 +1407,65 @@ def test_continue_run_missing_path_reports_resolved_path(tmp_path):
     assert result.exit_code == 1
     assert "Run directory not found" in flat
     assert "run_x" in flat
+
+
+# ── generate --image input validation (issue #223) ──────────────────
+
+
+def _write_png(path: Path) -> Path:
+    from PIL import Image
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (2, 2), color=(255, 0, 0)).save(path)
+    return path
+
+
+def test_image_flag_conflicts_with_continue(tmp_path):
+    """--image cannot be combined with --continue or --continue-run."""
+    sketch = _write_png(tmp_path / "sketch.png")
+
+    for continue_args in (["--continue"], ["--continue-run", "run_x"]):
+        result = runner.invoke(
+            app,
+            ["generate", *continue_args, "--image", str(sketch)],
+            terminal_width=HELP_TERMINAL_WIDTH,
+        )
+        flat = result.output.replace("\n", "")
+        assert result.exit_code == 1
+        assert "--image cannot be used with --continue" in flat
+
+
+def test_validate_input_image_paths_accepts_valid_images(tmp_path):
+    """Valid raster images are resolved to absolute paths, order preserved."""
+    first = _write_png(tmp_path / "a.png")
+    second = _write_png(tmp_path / "nested" / "b.png")
+
+    validated = _validate_input_image_paths([str(first), str(second)])
+
+    assert validated == [str(first.resolve()), str(second.resolve())]
+
+
+def test_validate_input_image_paths_empty_input():
+    """None or empty list validates to an empty list."""
+    assert _validate_input_image_paths(None) == []
+    assert _validate_input_image_paths([]) == []
+
+
+def test_validate_input_image_paths_rejects_missing_file(tmp_path):
+    """A nonexistent path exits with an error."""
+    with pytest.raises(typer.Exit):
+        _validate_input_image_paths([str(tmp_path / "missing.png")])
+
+
+def test_validate_input_image_paths_rejects_directory(tmp_path):
+    """A directory path exits with an error."""
+    with pytest.raises(typer.Exit):
+        _validate_input_image_paths([str(tmp_path)])
+
+
+def test_validate_input_image_paths_rejects_non_image(tmp_path):
+    """A file that is not a readable raster image exits with an error."""
+    fake = tmp_path / "fake.png"
+    fake.write_text("this is not an image")
+    with pytest.raises(typer.Exit):
+        _validate_input_image_paths([str(fake)])
